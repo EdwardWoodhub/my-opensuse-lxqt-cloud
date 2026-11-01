@@ -15,8 +15,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  OCI_IMAGE_NAME: my-wayland-opensuse-lite-cloud
-  ISO_BASE_NAME: my-wayland-opensuse-lite-cloud-iso
+  OCI_IMAGE_NAME: my-wayland-opensuse-cloud
+  ISO_BASE_NAME: my-wayland-opensuse-cloud-iso
 
 jobs:
   build:
