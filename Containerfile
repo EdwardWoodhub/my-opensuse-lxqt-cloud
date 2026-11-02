@@ -41,7 +41,6 @@ RUN ARCH=$(uname -m); \
         e2fsprogs \
         elemental-toolkit \
         fastfetch \
-        featherpad \
         findutils \
         fontconfig \
         gedit \
@@ -56,49 +55,38 @@ RUN ARCH=$(uname -m); \
         htop \
         iproute2 \
         kanshi \
-        kate \
         kernel-default \
         konsole \
         labwc \
         less \
         lvm2 \
-        lximage-qt \
         lxqt-labwc-session \
         lxqt-session \
         lxqt-wayland-session \
-        meld \
         Mesa \
         Mesa-dri \
-        MozillaFirefox \
         mtools \
         NetworkManager \
-        noto-sans-cjk-fonts \
         openbox \
         openssh-clients \
         openssh-server \
-        open-vm-tools \
-        open-vm-tools-desktop \
         parted \
         patterns-lxqt-lxqt \
         pcmanfm-qt \
         podman \
         python3 \
         qt6-wayland \
-        qterminal \
         rsync \
-        screengrab \
         sddm \
         sed \
         slurp \
         snapper \
-        spectacle \
         squashfs \
         sudo \
         swaybg \
         syncthing \
         systemd \
         tar \
-        tilix \
         timezone \
         uv \
         vim \
