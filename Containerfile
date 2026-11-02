@@ -81,7 +81,6 @@ RUN ARCH=$(uname -m); \
         sddm \
         sed \
         slurp \ 
-        slock \
         snapper \
         squashfs \
         sudo \
