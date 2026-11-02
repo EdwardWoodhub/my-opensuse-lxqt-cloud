@@ -26,8 +26,7 @@ jobs:
       packages: write       # 推送 GHCR 容器镜像必需权限
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      
 
       - name: Free Disk Space (Ubuntu Runner)
       run: |
@@ -51,6 +50,9 @@ jobs:
         
         echo "=== 清理后磁盘空间 ==="
         df -h
+      
+      - name: Checkout repository
+        uses: actions/checkout@v4
       
       # 1. 动态生成唯一的 Tag、版本号与 ISO 文件名
       - name: Generate Build Metadata
