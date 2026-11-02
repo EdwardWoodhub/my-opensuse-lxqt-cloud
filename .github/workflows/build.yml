@@ -128,27 +128,27 @@ jobs:
           RAW_BASE_NAME="${{ env.ISO_BASE_NAME }}-${{ env.RELEASE_TAG }}"
 
           echo "==> Building Hybrid Bootable RAW Disk via Elemental..."
-          # 使用同一容器镜像自举执行 build-disk
           docker run --rm -v $(pwd)/build-output:/build --privileged \
             ${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }} \
             elemental --debug build-disk \
             --name "${RAW_BASE_NAME}" \
-            -o /build \
-            docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}
+            --output /build \
+            --type raw \
+            --system "docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}"
 
           RAW_FILE="build-output/${RAW_BASE_NAME}.raw"
           if [ ! -f "${RAW_FILE}" ]; then
-            # 兼容处理：若 elemental 导出的文件后缀默认带了其它名称
+            # 兼容处理：若 elemental 默认带了扩展名前缀
             RAW_FILE=$(ls build-output/*.raw 2>/dev/null | head -n 1)
           fi
 
           echo "==> Found RAW Image: ${RAW_FILE}"
 
-          # 多线程极速 xz 压缩 (-T0 跑满 GitHub Runner 核心，-6 兼顾速度与体积)
+          # 多线程极速 xz 压缩 (-T0 跑满核心，-6 平衡压缩比与构建速度)
           echo "==> Compressing RAW to XZ..."
           xz -T0 -v -6 "${RAW_FILE}"
 
-          # 将压缩好的 .raw.xz 移入 release-assets 供下一步发布
+          # 将压缩好的 .raw.xz 移入 release-assets 供后续发布步骤直接捕获
           XZ_FILE="${RAW_FILE}.xz"
           mv "${XZ_FILE}" release-assets/
 
@@ -156,6 +156,8 @@ jobs:
           cd release-assets
           sha256sum $(basename "${XZ_FILE}") > "$(basename "${XZ_FILE}").sha256"
           ls -lh
+      
+      
       
       # 4. 发布独立的 GitHub Release（保留全部历史记录，不作删除）
       - name: Publish GitHub Release
