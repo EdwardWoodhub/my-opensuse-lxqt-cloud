@@ -28,28 +28,7 @@ jobs:
     steps:
       
 
-      - name: Free Disk Space (Ubuntu Runner)
-      run: |
-        echo "=== 清理前磁盘空间 ==="
-        df -h
-        
-        # 移除占用巨大的预装工具链（Android SDK、.NET、Haskell、CodeQL 等）
-        sudo rm -rf /usr/local/lib/android
-        sudo rm -rf /usr/share/dotnet
-        sudo rm -rf /opt/ghc
-        sudo rm -rf /usr/local/share/boost
-        sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-        
-        # 清理多余的大型包
-        sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' 'php.*' 'google-chrome-.*' || true
-        sudo apt-get autoremove -y || true
-        sudo apt-get clean
-        
-        # 清理 Docker 原本缓存的无用镜像
-        docker system prune -a -f --volumes || true
-        
-        echo "=== 清理后磁盘空间 ==="
-        df -h
+      
       
       - name: Checkout repository
         uses: actions/checkout@v4
