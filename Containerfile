@@ -80,7 +80,8 @@ RUN ARCH=$(uname -m); \
         rsync \
         sddm \
         sed \
-        slurp \
+        slurp \ 
+        slock \
         snapper \
         squashfs \
         sudo \
@@ -99,6 +100,7 @@ RUN ARCH=$(uname -m); \
         xautolock \
         xdg-utils \
         xorriso \
+        xscreensaver \
         xterm-resize \
         xwayland && \
     fc-cache -f && \
