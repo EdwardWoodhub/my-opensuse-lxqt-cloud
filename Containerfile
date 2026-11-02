@@ -53,6 +53,7 @@ RUN ARCH=$(uname -m); \
         gzip \
         haveged \
         htop \
+        i3lock \
         iproute2 \
         kanshi \
         kernel-default \
@@ -95,6 +96,8 @@ RUN ARCH=$(uname -m); \
         wl-clipboard \
         wlr-randr \
         wqy-microhei-fonts \
+        xautolock \
+        xdg-utils \
         xorriso \
         xterm-resize \
         xwayland && \
