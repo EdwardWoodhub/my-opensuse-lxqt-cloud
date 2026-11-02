@@ -1,1 +1,4 @@
-# my-wayland-opensuse-cloud
+# raw大小
+
+不要超过2GB
+
