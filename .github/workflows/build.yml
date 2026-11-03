@@ -4,12 +4,11 @@ on:
   push:
     branches: [ "main" ]
     paths-ignore:
-      - '**.md'              # 忽略仓库内所有目录下的 Markdown 文件修改
-      - 'LICENSE'            # 忽略开源协议文件变更
-      - '.gitignore'         # 忽略 gitignore 修改
-      - 'docs/**'            # 忽略纯文档目录
+      - '**.md'
+      - 'LICENSE'
+      - '.gitignore'
+      - 'docs/**'
   schedule:
-    # 每天 UTC 19:03 (北京时间次日凌晨 3:03) 定时触发
     - cron: '03 19 * * *'
   workflow_dispatch:
 
@@ -22,43 +21,34 @@ jobs:
   build:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write       # 创建 Release 及上传大文件附件必需权限
-      packages: write       # 推送 GHCR 容器镜像必需权限
+      contents: write
+      packages: write
 
     steps:
       - name: Free Disk Space (Ubuntu Runner)
         run: |
           echo "=== 清理前磁盘空间 ==="
           df -h
-          
-          # 移除占用巨大的预装工具链（Android SDK、.NET、Haskell、CodeQL 等）
           sudo rm -rf /usr/local/lib/android
           sudo rm -rf /usr/share/dotnet
           sudo rm -rf /opt/ghc
           sudo rm -rf /usr/local/share/boost
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
-          
-          # 清理多余的大型包
           sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' 'php.*' 'google-chrome-.*' || true
           sudo apt-get autoremove -y || true
           sudo apt-get clean
-          
-          # 清理 Docker 原本缓存的无用镜像
           docker system prune -a -f --volumes || true
-          
           echo "=== 清理后磁盘空间 ==="
           df -h
-      
+
       - name: Checkout repository
         uses: actions/checkout@v4
-      
-      # 1. 动态生成唯一的 Tag、版本号与 ISO 文件名
+
       - name: Generate Build Metadata
         id: meta
         run: |
           DATE_TAG=$(date -u +'%Y%m%d-%H%M%S')
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          
           if [ "${{ github.event_name }}" = "schedule" ]; then
             RELEASE_TAG="nightly-${DATE_TAG}"
             RELEASE_TITLE="Nightly Build (${DATE_TAG})"
@@ -69,9 +59,7 @@ jobs:
             RELEASE_TAG="commit-${DATE_TAG}-${SHORT_SHA}"
             RELEASE_TITLE="Commit Build (${DATE_TAG}-${SHORT_SHA})"
           fi
-
           ACTOR_LOWER=$(echo "${{ github.actor }}" | tr '[:upper:]' '[:lower:]')
-
           echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
           echo "RELEASE_TITLE=${RELEASE_TITLE}" >> $GITHUB_ENV
           echo "FULL_IMAGE_NAME=${{ env.REGISTRY }}/${ACTOR_LOWER}/${{ env.OCI_IMAGE_NAME }}" >> $GITHUB_ENV
@@ -87,7 +75,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 2. 构建并推送不可变 OCI 操作系统镜像
       - name: Build and push OS Container Image
         uses: docker/build-push-action@v5
         with:
@@ -101,12 +88,9 @@ jobs:
             REPO=${{ env.FULL_IMAGE_NAME }}
             VERSION=${{ env.RELEASE_TAG }}
 
-      # 3. 打包 ISO、检测体积并在超过 1.5GB 时执行自动分卷切割
       - name: Build Bootable ISO and Split if Exceeds 1.5GB
         run: |
           mkdir -p build-output release-assets
-          
-          # 打包完整 ISO (使用自建镜像自举打包)
           docker run --rm -v $(pwd)/build-output:/build --privileged \
             ${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }} \
             elemental --debug build-iso \
@@ -116,22 +100,14 @@ jobs:
             docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}
 
           ISO_PATH="build-output/${{ env.CURRENT_ISO_NAME }}.iso"
-          
-          
-          
-          # 计算 ISO 真实字节大小与阈值 (1.5GB = 1572864000 字节)
           FILE_SIZE=$(stat -c%s "${ISO_PATH}")
           MAX_SIZE=1572864000
-          
           cd build-output
-          # 先对原始完整 ISO 生成标准 SHA256 校验和
           sha256sum "${{ env.CURRENT_ISO_NAME }}.iso" > "../release-assets/${{ env.CURRENT_ISO_NAME }}.iso.sha256"
 
           if [ "${FILE_SIZE}" -gt "${MAX_SIZE}" ]; then
             echo "ISO file size (${FILE_SIZE} bytes) exceeds 1.5GB. Splitting into 1500M parts..."
             split -b 1500M -d -a 2 "${{ env.CURRENT_ISO_NAME }}.iso" "${{ env.CURRENT_ISO_NAME }}.iso.part"
-            
-            # 移动切片文件到发布目录并生成各切片的校验和
             mv ${{ env.CURRENT_ISO_NAME }}.iso.part* ../release-assets/
             cd ../release-assets
             sha256sum ${{ env.CURRENT_ISO_NAME }}.iso.part* >> "${{ env.CURRENT_ISO_NAME }}.iso.sha256"
@@ -142,10 +118,6 @@ jobs:
             echo "IS_SPLIT=false" >> $GITHUB_ENV
           fi
 
-       
-      
-      
-      # 4. 发布独立的 GitHub Release（保留全部历史记录，不作删除）
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -162,34 +134,27 @@ jobs:
             - **OCI Image (Latest):** `${{ env.FULL_IMAGE_NAME }}:latest`
             - **OCI Image (Immutable Tag):** `${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}`
             - **Split Files:** `${{ env.IS_SPLIT }}`
-
             ${{ env.IS_SPLIT == 'true' && format('#### 拼接 ISO 命令：
             ```bash
-            # Linux / macOS
             cat {0}.iso.part* > {0}.iso
             sha256sum -c {0}.iso.sha256
-
-            # Windows (CMD)
-            copy /b {0}.iso.part* {0}.iso
             ```', env.CURRENT_ISO_NAME) || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # =========================================================================
-      # 仅追加项 1：构建 RAW 镜像并流式 xz 压缩（引入 Btrfs 与分区扩容配置）
+      # 构建 RAW 镜像（已修正分区配置）
       # =========================================================================
       - name: Build and Compress Hybrid RAW Disk Image
         run: |
-          # 1. 新增 build-config 目录用于存放外部挂载的配置文件
           mkdir -p build-output raw-draft-assets build-config
           RAW_BASE_NAME="${{ env.ISO_BASE_NAME }}-${{ env.RELEASE_TAG }}"
 
-          # 2. 动态生成 Elemental 分区配置文件（设定 30GB state 和 8GB recovery，原生 Btrfs）
           echo "==> Generating partition config for RAW disk..."
-          cat <<EOF > build-config/manifest.yaml
-          snapshotter:
-            type: btrfs
+          cat <<EOF > build-config/config.yaml
           install:
+            snapshotter:
+              type: btrfs
             partitions:
               recovery:
                 size: 8192
@@ -203,7 +168,6 @@ jobs:
           EOF
 
           echo "==> Building Hybrid Bootable RAW Disk via Elemental..."
-          # 3. 挂载 build-config 目录，并传递 --config-dir 参数
           docker run --rm \
             -v $(pwd)/build-output:/build \
             -v $(pwd)/build-config:/config \
@@ -222,26 +186,17 @@ jobs:
           fi
 
           echo "==> Found RAW Image: ${RAW_FILE}"
-
-          # 规避 runner 用户与 docker root 的权限冲突
           sudo chown -R $USER:$USER build-output/
 
-          # 流式多线程 xz 压缩，直接写入独立输出目录
           echo "==> Compressing RAW to XZ..."
           XZ_FILE="raw-draft-assets/${RAW_BASE_NAME}.raw.xz"
           xz -T0 -v -6 < "${RAW_FILE}" > "${XZ_FILE}"
           rm -f "${RAW_FILE}"
 
-          # 生成 SHA256 校验和
           cd raw-draft-assets
           sha256sum "$(basename "${XZ_FILE}")" > "$(basename "${XZ_FILE}").sha256"
           ls -lh
-      
-      
 
-      # =========================================================================
-      # 仅追加项 2：将完整的 .raw.xz 发布为草稿（Draft Release）
-      # =========================================================================
       - name: Publish Draft Release (RAW Disk Image)
         uses: softprops/action-gh-release@v2
         with:
@@ -257,10 +212,7 @@ jobs:
             - **Format:** Unsplit Hybrid RAW Image (SeaBIOS + UEFI compatible)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      # =========================================================================
-      # 5. 末尾：登录并同步镜像到阿里云 ACR
-      # =========================================================================
+
       - name: Log in to Aliyun ACR
         if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
         uses: docker/login-action@v3
@@ -279,32 +231,17 @@ jobs:
           ACR_NAMESPACE: ${{ secrets.ALIYUN_ACR_NAMESPACE }}
         run: |
           set -e
-          # 检查必要密钥是否配置
           if [ -z "$ACR_REGISTRY" ] || [ -z "$ACR_NAMESPACE" ]; then
             echo "Error: ALIYUN_ACR_REGISTRY or ALIYUN_ACR_NAMESPACE secret is not set!"
             exit 1
           fi
-
-          # 构建完整镜像名
           GHCR_TAG_IMAGE="${FULL_IMAGE_NAME}:${RELEASE_TAG}"
           ALIYUN_TAG_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${OCI_IMAGE_NAME}:${RELEASE_TAG}"
           ALIYUN_LATEST_IMAGE="${ACR_REGISTRY}/${ACR_NAMESPACE}/${OCI_IMAGE_NAME}:latest"
-
-          echo "GHCR Image Source: $GHCR_TAG_IMAGE"
-          echo "Aliyun Target Tag: $ALIYUN_TAG_IMAGE"
-
-          # 如果本地没有该镜像，兜底拉取一次
           if ! docker image inspect "$GHCR_TAG_IMAGE" >/dev/null 2>&1; then
-            echo "Local image not found, pulling $GHCR_TAG_IMAGE ..."
             docker pull "$GHCR_TAG_IMAGE"
           fi
-
-          echo "Tagging images for Aliyun ACR ..."
           docker tag "$GHCR_TAG_IMAGE" "$ALIYUN_TAG_IMAGE"
           docker tag "$GHCR_TAG_IMAGE" "$ALIYUN_LATEST_IMAGE"
-
-          echo "Pushing to Aliyun ACR ..."
           docker push "$ALIYUN_TAG_IMAGE"
           docker push "$ALIYUN_LATEST_IMAGE"
-      
-      
