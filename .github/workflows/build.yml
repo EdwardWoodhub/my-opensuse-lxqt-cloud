@@ -193,13 +193,13 @@ jobs:
             partitions:
               recovery:
                 size: 8192
-                filesystem: btrfs
+                fs: btrfs
               state:
                 size: 30720
-                filesystem: btrfs
+                fs: btrfs
               persistent:
                 size: 0
-                filesystem: btrfs
+                fs: btrfs
           EOF
 
           echo "==> Building Hybrid Bootable RAW Disk via Elemental..."
