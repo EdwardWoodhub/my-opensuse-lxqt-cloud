@@ -139,6 +139,23 @@ RUN mkdir -p /system/oem && \
 # RUN mkdir -p /etc/elemental && \
 #     printf 'install:\n  snapshotter:\n    type: btrfs\n  partitions:\n    recovery:\n      size: 8192\n      filesystem: btrfs\n    state:\n      size: 20480\n      filesystem: btrfs\n    persistent:\n      size: 0\n      filesystem: btrfs\n' > /etc/elemental/config.yaml
 
+RUN mkdir -p /etc/elemental && \
+    cat > /etc/elemental/config.yaml << 'EOF'
+install:
+  snapshotter:
+    type: btrfs
+  partitions:
+    recovery:
+      size: 8192
+      fs: btrfs
+    state:
+      size: 30720
+      fs: btrfs
+    persistent:
+      size: 0
+      fs: btrfs
+EOF
+
 # ----------------------------------------------------
 # 6. 注入持久化目录初始化脚本与 Systemd 服务 (解决空寻址与桌面失忆)
 # ----------------------------------------------------
