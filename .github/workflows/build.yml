@@ -106,14 +106,13 @@ jobs:
           sha256sum "${{ env.CURRENT_ISO_NAME }}.iso" > "../release-assets/${{ env.CURRENT_ISO_NAME }}.iso.sha256"
 
           if [ "${FILE_SIZE}" -gt "${MAX_SIZE}" ]; then
-            echo "ISO file size (${FILE_SIZE} bytes) exceeds 1.5GB. Splitting into 1500M parts..."
+            echo "ISO exceeds 1.5GB, splitting..."
             split -b 1500M -d -a 2 "${{ env.CURRENT_ISO_NAME }}.iso" "${{ env.CURRENT_ISO_NAME }}.iso.part"
             mv ${{ env.CURRENT_ISO_NAME }}.iso.part* ../release-assets/
             cd ../release-assets
             sha256sum ${{ env.CURRENT_ISO_NAME }}.iso.part* >> "${{ env.CURRENT_ISO_NAME }}.iso.sha256"
             echo "IS_SPLIT=true" >> $GITHUB_ENV
           else
-            echo "ISO file size (${FILE_SIZE} bytes) is within 1.5GB. Uploading intact ISO..."
             mv "${{ env.CURRENT_ISO_NAME }}.iso" ../release-assets/
             echo "IS_SPLIT=false" >> $GITHUB_ENV
           fi
@@ -143,35 +142,89 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # =========================================================================
-      # 在容器中构建 RAW 磁盘镜像（配置文件从仓库挂载）
+      # 手动分区方案：提取 elemental 内容 + 自定义分区大小组装 RAW
       # =========================================================================
-      - name: Build and Compress Hybrid RAW Disk Image
+      - name: Build Custom Partition RAW Disk Image
         run: |
-          mkdir -p build-output raw-draft-assets
+          set -e
+          mkdir -p build-output raw-draft-assets work
           RAW_BASE_NAME="${{ env.ISO_BASE_NAME }}-${{ env.RELEASE_TAG }}"
+          RAW_FILE="build-output/${RAW_BASE_NAME}.raw"
 
-          echo "==> Building Hybrid Bootable RAW Disk via Elemental..."
+          echo "==> 1. 让 elemental 生成临时内容（提取 recovery、EFI 等）..."
           docker run --rm \
-            -v $(pwd)/build-output:/build \
-            -v $(pwd)/elemental-config:/config \
+            -v $(pwd)/work:/work \
             --privileged \
             ${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }} \
             elemental --debug build-disk \
-            --config-dir /config \
-            --name "${RAW_BASE_NAME}" \
-            --output /build \
+            --name temp \
+            --output /work \
             --type raw \
-            --system "docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}"
+            --system "docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}" || true
 
-          RAW_FILE="build-output/${RAW_BASE_NAME}.raw"
-          if [ ! -f "${RAW_FILE}" ]; then
-            RAW_FILE=$(ls build-output/*.raw 2>/dev/null | head -n 1)
+          # 查找生成的关键文件
+          RECOVERY_IMG=$(find work -name "recovery.img" | head -n 1)
+          EFI_DIR=$(find work -type d -name "EFI" | head -n 1)
+          echo "Recovery img: ${RECOVERY_IMG}"
+          echo "EFI dir: ${EFI_DIR}"
+
+          echo "==> 2. 创建自定义大小的 RAW 磁盘 (100G)..."
+          truncate -s 100G "${RAW_FILE}"
+
+          echo "==> 3. 分区：EFI 64M + OEM 64M + Recovery 8G + State 30G + Persistent 剩余..."
+          sgdisk -o "${RAW_FILE}"
+          sgdisk -n=1:2048:+64M -c=1:efi -t=1:EF00 "${RAW_FILE}"
+          sgdisk -n=2:0:+64M -c=2:oem -t=2:8300 "${RAW_FILE}"
+          sgdisk -n=3:0:+8G -c=3:recovery -t=3:8300 "${RAW_FILE}"
+          sgdisk -n=4:0:+30G -c=4:state -t=4:8300 "${RAW_FILE}"
+          sgdisk -n=5:0:0 -c=5:persistent -t=5:8300 "${RAW_FILE}"
+
+          echo "==> 4. 挂载 loop 并格式化..."
+          LOOP=$(sudo losetup -f --show -P "${RAW_FILE}")
+          echo "Loop device: ${LOOP}"
+
+          sudo mkfs.vfat -n COS_GRUB "${LOOP}p1"
+          sudo mkfs.ext4 -L COS_OEM "${LOOP}p2"
+          sudo mkfs.ext4 -L COS_RECOVERY "${LOOP}p3"
+          sudo mkfs.btrfs -L COS_STATE -f "${LOOP}p4"
+          sudo mkfs.ext4 -L COS_PERSISTENT "${LOOP}p5"
+
+          echo "==> 5. 写入内容..."
+          mkdir -p mnt
+
+          # 5.1 写入 EFI（GRUB）
+          if [ -n "${EFI_DIR}" ]; then
+            sudo mount "${LOOP}p1" mnt
+            sudo cp -a "${EFI_DIR}" mnt/ || true
+            # 如果有 grub_oem_env 也拷贝
+            find work -name "grub_oem_env" -exec sudo cp {} mnt/ \; || true
+            sudo umount mnt
           fi
 
-          echo "==> Found RAW Image: ${RAW_FILE}"
-          sudo chown -R $USER:$USER build-output/
+          # 5.2 写入 Recovery
+          if [ -n "${RECOVERY_IMG}" ]; then
+            sudo mount "${LOOP}p3" mnt
+            sudo mkdir -p mnt/boot
+            sudo cp "${RECOVERY_IMG}" mnt/boot/recovery.img
+            # 拷贝内核和 initrd（如果存在）
+            find work -name "vmlinuz*" -exec sudo cp {} mnt/boot/ \; || true
+            find work -name "initrd*" -exec sudo cp {} mnt/boot/ \; || true
+            sudo umount mnt
+          fi
 
-          echo "==> Compressing RAW to XZ..."
+          # 5.3 State 分区（btrfs 基础结构，后续升级会完善快照）
+          sudo mount "${LOOP}p4" mnt
+          sudo btrfs subvolume create mnt/@ || true
+          sudo btrfs subvolume create mnt/@/.snapshots || true
+          sudo umount mnt
+
+          # 5.4 Persistent 保持空即可（首次启动后使用）
+          # OEM 也保持空
+
+          sudo losetup -d "${LOOP}"
+          rm -rf mnt
+
+          echo "==> 6. 压缩 RAW..."
           XZ_FILE="raw-draft-assets/${RAW_BASE_NAME}.raw.xz"
           xz -T0 -v -6 < "${RAW_FILE}" > "${XZ_FILE}"
           rm -f "${RAW_FILE}"
@@ -190,9 +243,11 @@ jobs:
           prerelease: false
           files: raw-draft-assets/*
           body: |
-            ### Elemental Bootable RAW Disk Image (Draft)
-            - **Commit SHA:** `${{ github.sha }}`
-            - **Format:** Unsplit Hybrid RAW Image (SeaBIOS + UEFI compatible)
+            ### Elemental Bootable RAW Disk Image (Draft) - Custom Partitions
+            - **Recovery:** 8G
+            - **State:** 30G
+            - **Persistent:** remaining space
+            - **Note:** Manually assembled partitions
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
