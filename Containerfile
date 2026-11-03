@@ -136,8 +136,8 @@ RUN mkdir -p /system/oem && \
 # ----------------------------------------------------
 # 5. 固化 Elemental 分区配置（Btrfs 原生快照）
 # ----------------------------------------------------
-RUN mkdir -p /etc/elemental && \
-    printf 'install:\n  snapshotter:\n    type: btrfs\n  partitions:\n    recovery:\n      size: 8192\n      filesystem: btrfs\n    state:\n      size: 20480\n      filesystem: btrfs\n    persistent:\n      size: 0\n      filesystem: btrfs\n' > /etc/elemental/config.yaml
+# RUN mkdir -p /etc/elemental && \
+#     printf 'install:\n  snapshotter:\n    type: btrfs\n  partitions:\n    recovery:\n      size: 8192\n      filesystem: btrfs\n    state:\n      size: 20480\n      filesystem: btrfs\n    persistent:\n      size: 0\n      filesystem: btrfs\n' > /etc/elemental/config.yaml
 
 # ----------------------------------------------------
 # 6. 注入持久化目录初始化脚本与 Systemd 服务 (解决空寻址与桌面失忆)
