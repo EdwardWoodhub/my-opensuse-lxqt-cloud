@@ -176,17 +176,41 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # =========================================================================
-      # 仅追加项 1：构建 RAW 镜像并流式 xz 压缩（不切片，存入专属目录）
+      # 仅追加项 1：构建 RAW 镜像并流式 xz 压缩（引入 Btrfs 与分区扩容配置）
       # =========================================================================
       - name: Build and Compress Hybrid RAW Disk Image
         run: |
-          mkdir -p build-output raw-draft-assets
+          # 1. 新增 build-config 目录用于存放外部挂载的配置文件
+          mkdir -p build-output raw-draft-assets build-config
           RAW_BASE_NAME="${{ env.ISO_BASE_NAME }}-${{ env.RELEASE_TAG }}"
 
+          # 2. 动态生成 Elemental 分区配置文件（设定 30GB state 和 8GB recovery，原生 Btrfs）
+          echo "==> Generating partition config for RAW disk..."
+          cat <<EOF > build-config/manifest.yaml
+          snapshotter:
+            type: btrfs
+          install:
+            partitions:
+              recovery:
+                size: 8192
+                filesystem: btrfs
+              state:
+                size: 30720
+                filesystem: btrfs
+              persistent:
+                size: 0
+                filesystem: btrfs
+          EOF
+
           echo "==> Building Hybrid Bootable RAW Disk via Elemental..."
-          docker run --rm -v $(pwd)/build-output:/build --privileged \
+          # 3. 挂载 build-config 目录，并传递 --config-dir 参数
+          docker run --rm \
+            -v $(pwd)/build-output:/build \
+            -v $(pwd)/build-config:/config \
+            --privileged \
             ${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }} \
             elemental --debug build-disk \
+            --config-dir /config \
             --name "${RAW_BASE_NAME}" \
             --output /build \
             --type raw \
@@ -212,6 +236,8 @@ jobs:
           cd raw-draft-assets
           sha256sum "$(basename "${XZ_FILE}")" > "$(basename "${XZ_FILE}").sha256"
           ls -lh
+      
+      
 
       # =========================================================================
       # 仅追加项 2：将完整的 .raw.xz 发布为草稿（Draft Release）
