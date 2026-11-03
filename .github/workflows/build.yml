@@ -88,34 +88,15 @@ jobs:
             REPO=${{ env.FULL_IMAGE_NAME }}
             VERSION=${{ env.RELEASE_TAG }}
 
-      - name: Install elemental and required tools on host
-        run: |
-          # 从刚构建的镜像中提取 elemental 二进制
-          docker create --name elemental-tmp ${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}
-          docker cp elemental-tmp:/usr/bin/elemental /usr/local/bin/elemental
-          docker rm elemental-tmp
-          chmod +x /usr/local/bin/elemental
-
-          # 安装 build-disk / build-iso 所需工具
-          sudo apt-get update
-          sudo apt-get install -y \
-            gdisk \
-            parted \
-            btrfs-progs \
-            squashfs-tools \
-            dosfstools \
-            mtools \
-            xorriso \
-            grub-efi-amd64-bin \
-            grub-pc-bin
-
-      - name: Build Bootable ISO
+      - name: Build Bootable ISO and Split if Exceeds 1.5GB
         run: |
           mkdir -p build-output release-assets
-          sudo elemental --debug build-iso \
+          docker run --rm -v $(pwd)/build-output:/build --privileged \
+            ${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }} \
+            elemental --debug build-iso \
             --name ${{ env.CURRENT_ISO_NAME }} \
             --bootloader-in-rootfs \
-            -o ./build-output \
+            -o /build \
             docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}
 
           ISO_PATH="build-output/${{ env.CURRENT_ISO_NAME }}.iso"
@@ -125,13 +106,14 @@ jobs:
           sha256sum "${{ env.CURRENT_ISO_NAME }}.iso" > "../release-assets/${{ env.CURRENT_ISO_NAME }}.iso.sha256"
 
           if [ "${FILE_SIZE}" -gt "${MAX_SIZE}" ]; then
-            echo "ISO exceeds 1.5GB, splitting..."
+            echo "ISO file size (${FILE_SIZE} bytes) exceeds 1.5GB. Splitting into 1500M parts..."
             split -b 1500M -d -a 2 "${{ env.CURRENT_ISO_NAME }}.iso" "${{ env.CURRENT_ISO_NAME }}.iso.part"
             mv ${{ env.CURRENT_ISO_NAME }}.iso.part* ../release-assets/
             cd ../release-assets
             sha256sum ${{ env.CURRENT_ISO_NAME }}.iso.part* >> "${{ env.CURRENT_ISO_NAME }}.iso.sha256"
             echo "IS_SPLIT=true" >> $GITHUB_ENV
           else
+            echo "ISO file size (${FILE_SIZE} bytes) is within 1.5GB. Uploading intact ISO..."
             mv "${{ env.CURRENT_ISO_NAME }}.iso" ../release-assets/
             echo "IS_SPLIT=false" >> $GITHUB_ENV
           fi
@@ -161,35 +143,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # =========================================================================
-      # 在宿主机直接构建 RAW 磁盘镜像
+      # 在容器中构建 RAW 磁盘镜像（配置文件从仓库挂载）
       # =========================================================================
       - name: Build and Compress Hybrid RAW Disk Image
         run: |
-          mkdir -p build-output raw-draft-assets build-config
+          mkdir -p build-output raw-draft-assets
           RAW_BASE_NAME="${{ env.ISO_BASE_NAME }}-${{ env.RELEASE_TAG }}"
 
-          echo "==> Generating partition config..."
-          cat <<EOF > build-config/config.yaml
-          install:
-            snapshotter:
-              type: btrfs
-            partitions:
-              recovery:
-                size: 8192
-                fs: btrfs
-              state:
-                size: 30720
-                fs: btrfs
-              persistent:
-                size: 0
-                fs: btrfs
-          EOF
-
-          echo "==> Building RAW disk on host..."
-          sudo elemental --debug build-disk \
-            --config-dir ./build-config \
+          echo "==> Building Hybrid Bootable RAW Disk via Elemental..."
+          docker run --rm \
+            -v $(pwd)/build-output:/build \
+            -v $(pwd)/elemental-config:/config \
+            --privileged \
+            ${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }} \
+            elemental --debug build-disk \
+            --config-dir /config \
             --name "${RAW_BASE_NAME}" \
-            --output ./build-output \
+            --output /build \
             --type raw \
             --system "docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}"
 
