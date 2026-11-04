@@ -143,7 +143,11 @@ RUN mkdir -p /etc/elemental && \
     cat > /etc/elemental/config.yaml << 'EOF'
 install:
   snapshotter:
-    type: btrfs
+    type: loopdevice
+    max-snaps: 2
+    config:
+      size: 16384
+      fs: ext2
   partitions:
     recovery:
       size: 8192
@@ -155,6 +159,8 @@ install:
       size: 0
       fs: btrfs
 EOF
+
+
 
 # ----------------------------------------------------
 # 6. 注入持久化目录初始化脚本与 Systemd 服务 (解决空寻址与桌面失忆)
