@@ -142,7 +142,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # =========================================================================
-      # 手动分区方案：提取 elemental 内容 + 自定义分区大小组装 RAW
+      # 手动分区方案：提取 elemental 内容 + 自定义分区大小组装 98G RAW
       # =========================================================================
       - name: Build Custom Partition RAW Disk Image
         run: |
@@ -151,7 +151,7 @@ jobs:
           RAW_BASE_NAME="${{ env.ISO_BASE_NAME }}-${{ env.RELEASE_TAG }}"
           RAW_FILE="build-output/${RAW_BASE_NAME}.raw"
 
-          echo "==> 1. 让 elemental 生成临时内容（提取 recovery、EFI 等）..."
+          echo "==> 1. 让 elemental 生成临时内容（提取 recovery、EFI、grub.cfg 等）..."
           docker run --rm \
             -v $(pwd)/work:/work \
             --privileged \
@@ -162,13 +162,21 @@ jobs:
             --type raw \
             --system "docker:${{ env.FULL_IMAGE_NAME }}:${{ env.RELEASE_TAG }}" || true
 
-          # 查找生成的关键文件
-          RECOVERY_IMG=$(find work -name "recovery.img" | head -n 1)
-          EFI_DIR=$(find work -type d -name "EFI" | head -n 1)
-          echo "Recovery img: ${RECOVERY_IMG}"
-          echo "EFI dir: ${EFI_DIR}"
+          echo "==> 临时目录结构："
+          find work -type d -name "EFI" -o -name "grub.cfg" -o -name "recovery.img" | head -20
 
-          echo "==> 2. 创建自定义大小的 RAW 磁盘 (100G)..."
+          # 查找关键文件
+          RECOVERY_IMG=$(find work -name "recovery.img" | head -n 1)
+          EFI_SRC=$(find work -type d -name "EFI" | head -n 1)
+          GRUB_CFG=$(find work -name "grub.cfg" | head -n 1)
+          GRUB_OEM_ENV=$(find work -name "grub_oem_env" | head -n 1)
+
+          echo "Recovery img: ${RECOVERY_IMG}"
+          echo "EFI dir: ${EFI_SRC}"
+          echo "grub.cfg: ${GRUB_CFG}"
+          echo "grub_oem_env: ${GRUB_OEM_ENV}"
+
+          echo "==> 2. 创建 98G RAW 磁盘..."
           truncate -s 98G "${RAW_FILE}"
 
           echo "==> 3. 分区：EFI 64M + OEM 64M + Recovery 8G + State 30G + Persistent 剩余..."
@@ -192,34 +200,44 @@ jobs:
           echo "==> 5. 写入内容..."
           mkdir -p mnt
 
-          # 5.1 写入 EFI（GRUB）
-          if [ -n "${EFI_DIR}" ]; then
-            sudo mount "${LOOP}p1" mnt
-            sudo cp -a "${EFI_DIR}" mnt/ || true
-            # 如果有 grub_oem_env 也拷贝
-            find work -name "grub_oem_env" -exec sudo cp {} mnt/ \; || true
-            sudo umount mnt
+          # 5.1 写入 EFI 分区（完整 EFI 目录 + grub.cfg + grub_oem_env）
+          sudo mount "${LOOP}p1" mnt
+          if [ -n "${EFI_SRC}" ]; then
+            echo "Copying EFI directory..."
+            sudo cp -a "${EFI_SRC}" mnt/
           fi
+          if [ -n "${GRUB_CFG}" ]; then
+            echo "Copying grub.cfg..."
+            sudo mkdir -p mnt/EFI/BOOT mnt/EFI/ELEMENTAL mnt/grub
+            sudo cp "${GRUB_CFG}" mnt/EFI/BOOT/grub.cfg || true
+            sudo cp "${GRUB_CFG}" mnt/EFI/ELEMENTAL/grub.cfg || true
+            sudo cp "${GRUB_CFG}" mnt/grub/grub.cfg || true
+          fi
+          if [ -n "${GRUB_OEM_ENV}" ]; then
+            echo "Copying grub_oem_env..."
+            sudo cp "${GRUB_OEM_ENV}" mnt/grub_oem_env || true
+            sudo cp "${GRUB_OEM_ENV}" mnt/grub/grubenv || true
+          fi
+          echo "EFI partition content:"
+          sudo find mnt -type f | head -30
+          sudo umount mnt
 
-          # 5.2 写入 Recovery
+          # 5.2 写入 Recovery 分区
           if [ -n "${RECOVERY_IMG}" ]; then
             sudo mount "${LOOP}p3" mnt
             sudo mkdir -p mnt/boot
             sudo cp "${RECOVERY_IMG}" mnt/boot/recovery.img
-            # 拷贝内核和 initrd（如果存在）
+            # 额外拷贝内核和 initrd
             find work -name "vmlinuz*" -exec sudo cp {} mnt/boot/ \; || true
             find work -name "initrd*" -exec sudo cp {} mnt/boot/ \; || true
             sudo umount mnt
           fi
 
-          # 5.3 State 分区（btrfs 基础结构，后续升级会完善快照）
+          # 5.3 State 分区（btrfs 基础结构）
           sudo mount "${LOOP}p4" mnt
           sudo btrfs subvolume create mnt/@ || true
           sudo btrfs subvolume create mnt/@/.snapshots || true
           sudo umount mnt
-
-          # 5.4 Persistent 保持空即可（首次启动后使用）
-          # OEM 也保持空
 
           sudo losetup -d "${LOOP}"
           rm -rf mnt
@@ -244,10 +262,11 @@ jobs:
           files: raw-draft-assets/*
           body: |
             ### Elemental Bootable RAW Disk Image (Draft) - Custom Partitions
+            - **Disk size:** 98G
             - **Recovery:** 8G
             - **State:** 30G
             - **Persistent:** remaining space
-            - **Note:** Manually assembled partitions
+            - **Note:** Manually assembled with EFI/GRUB content
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
