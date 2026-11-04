@@ -169,7 +169,7 @@ jobs:
           echo "EFI dir: ${EFI_DIR}"
 
           echo "==> 2. 创建自定义大小的 RAW 磁盘 (100G)..."
-          truncate -s 100G "${RAW_FILE}"
+          truncate -s 98G "${RAW_FILE}"
 
           echo "==> 3. 分区：EFI 64M + OEM 64M + Recovery 8G + State 30G + Persistent 剩余..."
           sgdisk -o "${RAW_FILE}"
