@@ -143,11 +143,8 @@ RUN mkdir -p /etc/elemental && \
     cat > /etc/elemental/config.yaml << 'EOF'
 install:
   snapshotter:
-    type: loopdevice
-    max-snaps: 2
-    config:
-      size: 16384
-      fs: ext2
+    type: btrfs
+    max-snaps: 4
   partitions:
     recovery:
       size: 8192
